@@ -80,7 +80,7 @@ def register_cursor(register_config):
     options.add_extension(turnstile_patch_path)
 
     # If fail to pass the cloudflare in headless mode, try to align the user agent with your real browser
-    if enable_headless: 
+    if enable_headless:
         from platform import platform
         if platform == "linux" or platform == "linux2":
             platformIdentifier = "X11; Linux x86_64"
@@ -89,7 +89,7 @@ def register_cursor(register_config):
         elif platform == "win32":
             platformIdentifier = "Windows NT 10.0; Win64; x64"
         # Please align version with your Chrome
-        chrome_version = "130.0.0.0"        
+        chrome_version = "130.0.0.0"
         options.set_user_agent(f"Mozilla/5.0 ({platformIdentifier}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36")
         options.headless()
 
@@ -97,7 +97,16 @@ def register_cursor(register_config):
     max_workers = register_config.max_workers
     print(f"[Register] Start to register {number} accounts in {max_workers} threads")
 
-    # Run the code using multithreading
+    formatted_date = datetime.now().strftime("%Y-%m-%d")
+    fieldnames = ['username', 'token']
+
+    # 打开文件时禁用缓冲
+    output_file = open(f"./output_{formatted_date}.csv", 'a', newline='', buffering=1)
+    token_file = open(f"./token_{formatted_date}.csv", 'a', newline='', buffering=1)
+
+    writer = csv.DictWriter(output_file, fieldnames=fieldnames)
+    token_writer = csv.DictWriter(token_file, fieldnames=['token'])
+
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
@@ -105,29 +114,24 @@ def register_cursor(register_config):
             register_config_thread = copy.deepcopy(register_config)
             use_custom_address = register_config.email_server.use_custom_address
             custom_email_address = register_config.email_server.custom_email_address
-            register_config_thread.email_server.email_address = custom_email_address[idx] if use_custom_address else None
+            register_config_thread.email_server.email_address = custom_email_address[
+                idx] if use_custom_address else None
             options_thread = copy.deepcopy(options)
             futures.append(executor.submit(register_cursor_core, register_config_thread, options_thread))
+
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
-            if result is not None:
+            if result is not None and result["token"] is not None:
                 results.append(result)
+                # 写入并立即刷新
+                writer.writerow(result)
+                token_writer.writerow({'token': result['token']})
+                output_file.flush()
+                token_file.flush()
 
-    results = [result for result in results if result["token"] is not None]
-
-    if len(results) > 0:
-        formatted_date = datetime.now().strftime("%Y-%m-%d")
-
-        fieldnames = results[0].keys()
-        # Write username, token into a csv file
-        with open(f"./output_{formatted_date}.csv", 'a', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=fieldnames)
-            writer.writerows(results)
-        # Only write token to csv file, without header
-        tokens = [{'token': row['token']} for row in results]
-        with open( f"./token_{formatted_date}.csv", 'a', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=['token'])
-            writer.writerows(tokens)
+    # 关闭文件
+    output_file.close()
+    token_file.close()
 
     return results
 
